@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">Claude Code Web UI</string>
+    <string name="connect">连接</string>
+    <string name="connect_title">连接到 Claude Code Web UI</string>
+    <string name="connect_subtitle">请输入后端服务的 IP/Host 和端口</string>
+    <string name="server_host_hint">服务器 IP / Host</string>
+    <string name="port_hint">端口（默认 8080）</string>
+    <string name="use_https">使用 HTTPS</string>
+    <string name="connection_error">请输入有效的服务器地址</string>
+    <string name="port_error">请输入 1-65535 范围内的端口</string>
+    <string name="ssl_warning">已忽略证书校验，仅用于开发/自签名环境</string>
+</resources>

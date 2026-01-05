@@ -1,0 +1,19 @@
+# Gradle
+/.gradle/
+app/build/
+
+# Android SDK
+/.android-sdk/
+
+# IDE
+/.idea/
+*.iml
+
+# OS
+.DS_Store
+
+# JDK
+/.jdk/
+
+# APK files (will be committed in releases/ folder)
+*.apk
