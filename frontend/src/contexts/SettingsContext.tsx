@@ -48,16 +48,30 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     });
   }, [settings.enterBehavior, updateSettings]);
 
+  const toggleAutoApprovePermissions = useCallback(() => {
+    updateSettings({
+      autoApprovePermissions: !settings.autoApprovePermissions,
+    });
+  }, [settings.autoApprovePermissions, updateSettings]);
+
   const value = useMemo(
     (): SettingsContextType => ({
       settings,
       theme: settings.theme,
       enterBehavior: settings.enterBehavior,
+      autoApprovePermissions: settings.autoApprovePermissions,
       toggleTheme,
       toggleEnterBehavior,
+      toggleAutoApprovePermissions,
       updateSettings,
     }),
-    [settings, toggleTheme, toggleEnterBehavior, updateSettings],
+    [
+      settings,
+      toggleTheme,
+      toggleEnterBehavior,
+      toggleAutoApprovePermissions,
+      updateSettings,
+    ],
   );
 
   return (

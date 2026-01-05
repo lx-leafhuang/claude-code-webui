@@ -21,5 +21,11 @@ export function useEnterBehavior() {
   return { enterBehavior, toggleEnterBehavior };
 }
 
+export function useAutoApprovePermissions() {
+  const { autoApprovePermissions, toggleAutoApprovePermissions } =
+    useSettings();
+  return { autoApprovePermissions, toggleAutoApprovePermissions };
+}
+
 // Re-export types for convenience
 export type { Theme, EnterBehavior } from "../types/settings";

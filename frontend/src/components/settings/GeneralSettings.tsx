@@ -2,12 +2,19 @@ import {
   SunIcon,
   MoonIcon,
   CommandLineIcon,
+  ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { useSettings } from "../../hooks/useSettings";
 
 export function GeneralSettings() {
-  const { theme, enterBehavior, toggleTheme, toggleEnterBehavior } =
-    useSettings();
+  const {
+    theme,
+    enterBehavior,
+    autoApprovePermissions,
+    toggleTheme,
+    toggleEnterBehavior,
+    toggleAutoApprovePermissions,
+  } = useSettings();
 
   return (
     <div className="space-y-6">
@@ -88,6 +95,44 @@ export function GeneralSettings() {
             <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
               Controls how the Enter key behaves when typing messages in the
               chat input.
+            </div>
+          </div>
+
+          {/* Auto Approve Permissions Setting */}
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">
+              Auto Approve Permissions
+            </label>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleAutoApprovePermissions}
+                className="flex items-center gap-3 px-4 py-3 bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-all duration-200 text-left flex-1"
+                role="switch"
+                aria-checked={autoApprovePermissions}
+                aria-label={`Auto approve permissions toggle. Currently set to ${autoApprovePermissions ? "enabled" : "disabled"}. Click to switch.`}
+              >
+                <ShieldCheckIcon
+                  className={`w-5 h-5 ${
+                    autoApprovePermissions
+                      ? "text-green-500"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                />
+                <div>
+                  <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                    {autoApprovePermissions ? "Enabled" : "Disabled"}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    {autoApprovePermissions
+                      ? "All permission requests will be automatically approved"
+                      : "Permission requests will require manual approval"}
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+              When enabled, all tool permission requests will be automatically
+              approved without showing a dialog.
             </div>
           </div>
         </div>

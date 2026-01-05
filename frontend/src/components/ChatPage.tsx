@@ -1,6 +1,6 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { ChevronLeftIcon } from "@heroicons/react/24/outline";
+import { ChevronLeftIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 import type {
   ChatRequest,
   ChatMessage,
@@ -13,6 +13,7 @@ import { usePermissions } from "../hooks/chat/usePermissions";
 import { usePermissionMode } from "../hooks/chat/usePermissionMode";
 import { useAbortController } from "../hooks/chat/useAbortController";
 import { useAutoHistoryLoader } from "../hooks/useHistoryLoader";
+import { useAutoApprovePermissions } from "../hooks/useSettings";
 import { SettingsButton } from "./SettingsButton";
 import { SettingsModal } from "./SettingsModal";
 import { HistoryButton } from "./chat/HistoryButton";
@@ -30,6 +31,13 @@ export function ChatPage() {
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Auto approve permissions setting
+  const { autoApprovePermissions, toggleAutoApprovePermissions } =
+    useAutoApprovePermissions();
+  // Use ref to avoid stale closure in streaming context
+  const autoApprovePermissionsRef = useRef(autoApprovePermissions);
+  autoApprovePermissionsRef.current = autoApprovePermissions;
 
   // Extract and normalize working directory from URL
   const workingDirectory = (() => {
@@ -127,19 +135,6 @@ export function ChatPage() {
     onPermissionModeChange: setPermissionMode,
   });
 
-  const handlePermissionError = useCallback(
-    (toolName: string, patterns: string[], toolUseId: string) => {
-      // Check if this is an ExitPlanMode permission error
-      if (patterns.includes("ExitPlanMode")) {
-        // For ExitPlanMode, show plan permission interface instead of regular permission
-        showPlanModeRequest(""); // Empty plan content since it was already displayed
-      } else {
-        showPermissionRequest(toolName, patterns, toolUseId);
-      }
-    },
-    [showPermissionRequest, showPlanModeRequest],
-  );
-
   const sendMessage = useCallback(
     async (
       messageContent?: string,
@@ -167,6 +162,11 @@ export function ChatPage() {
       startRequest();
 
       try {
+        // Determine effective permission mode: use bypassPermissions if auto-approve is enabled
+        const effectivePermissionMode = autoApprovePermissionsRef.current
+          ? "bypassPermissions"
+          : overridePermissionMode || permissionMode;
+
         const response = await fetch(getChatUrl(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -176,7 +176,7 @@ export function ChatPage() {
             ...(currentSessionId ? { sessionId: currentSessionId } : {}),
             allowedTools: tools || allowedTools,
             ...(workingDirectory ? { workingDirectory } : {}),
-            permissionMode: overridePermissionMode || permissionMode,
+            permissionMode: effectivePermissionMode,
           } as ChatRequest),
         });
 
@@ -204,7 +204,23 @@ export function ChatPage() {
             localHasReceivedInit = received;
             setHasReceivedInit(received);
           },
-          onPermissionError: handlePermissionError,
+          // Use ref to avoid stale closure - bypass dialog if auto-approve is enabled
+          onPermissionError: (
+            toolName: string,
+            patterns: string[],
+            toolUseId: string,
+          ) => {
+            if (autoApprovePermissionsRef.current) {
+              // Auto-approve is enabled, silently ignore the permission request
+              return;
+            }
+            // Check if this is an ExitPlanMode permission error
+            if (patterns.includes("ExitPlanMode")) {
+              showPlanModeRequest("");
+            } else {
+              showPermissionRequest(toolName, patterns, toolUseId);
+            }
+          },
           onAbortRequest: async () => {
             shouldAbort = true;
             await createAbortHandler(requestId)();
@@ -257,8 +273,9 @@ export function ChatPage() {
       setCurrentAssistantMessage,
       resetRequestState,
       processStreamLine,
-      handlePermissionError,
       createAbortHandler,
+      showPermissionRequest,
+      showPlanModeRequest,
     ],
   );
 
@@ -270,46 +287,34 @@ export function ChatPage() {
   const handlePermissionAllow = useCallback(() => {
     if (!permissionRequest) return;
 
-    // Add all patterns temporarily
-    let updatedAllowedTools = allowedTools;
-    permissionRequest.patterns.forEach((pattern) => {
-      updatedAllowedTools = allowToolTemporary(pattern, updatedAllowedTools);
-    });
-
     closePermissionRequest();
 
+    // Use bypassPermissions mode to truly approve the permission
     if (currentSessionId) {
-      sendMessage("continue", updatedAllowedTools, true);
+      sendMessage("continue", allowedTools, true, "bypassPermissions");
     }
   }, [
     permissionRequest,
     currentSessionId,
     sendMessage,
     allowedTools,
-    allowToolTemporary,
     closePermissionRequest,
   ]);
 
   const handlePermissionAllowPermanent = useCallback(() => {
     if (!permissionRequest) return;
 
-    // Add all patterns permanently
-    let updatedAllowedTools = allowedTools;
-    permissionRequest.patterns.forEach((pattern) => {
-      updatedAllowedTools = allowToolPermanent(pattern, updatedAllowedTools);
-    });
-
     closePermissionRequest();
 
+    // Use bypassPermissions mode to truly approve the permission
     if (currentSessionId) {
-      sendMessage("continue", updatedAllowedTools, true);
+      sendMessage("continue", allowedTools, true, "bypassPermissions");
     }
   }, [
     permissionRequest,
     currentSessionId,
     sendMessage,
     allowedTools,
-    allowToolPermanent,
     closePermissionRequest,
   ]);
 
@@ -508,6 +513,31 @@ export function ChatPage() {
           </div>
           <div className="flex items-center gap-3">
             {!isHistoryView && <HistoryButton onClick={handleHistoryClick} />}
+            {/* Auto Approve Permissions Toggle */}
+            <button
+              onClick={toggleAutoApprovePermissions}
+              className={`p-2 rounded-lg border transition-all duration-200 backdrop-blur-sm shadow-sm hover:shadow-md ${
+                autoApprovePermissions
+                  ? "bg-green-50/80 dark:bg-green-900/20 border-green-200 dark:border-green-800"
+                  : "bg-white/80 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700"
+              }`}
+              role="switch"
+              aria-checked={autoApprovePermissions}
+              aria-label={`Auto approve permissions. Currently ${autoApprovePermissions ? "enabled" : "disabled"}. Click to toggle.`}
+              title={
+                autoApprovePermissions
+                  ? "Auto approve enabled - click to disable"
+                  : "Auto approve disabled - click to enable"
+              }
+            >
+              <ShieldCheckIcon
+                className={`w-5 h-5 ${
+                  autoApprovePermissions
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-slate-600 dark:text-slate-400"
+                }`}
+              />
+            </button>
             <SettingsButton onClick={handleSettingsClick} />
           </div>
         </div>

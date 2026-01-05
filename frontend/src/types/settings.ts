@@ -4,6 +4,7 @@ export type EnterBehavior = "send" | "newline";
 export interface AppSettings {
   theme: Theme;
   enterBehavior: EnterBehavior;
+  autoApprovePermissions: boolean;
   version: number;
 }
 
@@ -16,8 +17,10 @@ export interface SettingsContextType {
   settings: AppSettings;
   theme: Theme;
   enterBehavior: EnterBehavior;
+  autoApprovePermissions: boolean;
   toggleTheme: () => void;
   toggleEnterBehavior: () => void;
+  toggleAutoApprovePermissions: () => void;
   updateSettings: (updates: Partial<AppSettings>) => void;
 }
 
@@ -25,8 +28,9 @@ export interface SettingsContextType {
 export const DEFAULT_SETTINGS: AppSettings = {
   theme: "light",
   enterBehavior: "send",
+  autoApprovePermissions: false,
   version: 1,
 };
 
 // Current settings version for migration
-export const CURRENT_SETTINGS_VERSION = 1;
+export const CURRENT_SETTINGS_VERSION = 2;
