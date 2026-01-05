@@ -438,6 +438,19 @@ export function ChatPage() {
     return () => document.removeEventListener("keydown", handleGlobalKeyDown);
   }, [isLoading, currentRequestId, handleAbort]);
 
+  // Update page title based on working directory and session
+  useEffect(() => {
+    const titleParts = [];
+    if (workingDirectory) {
+      titleParts.push(workingDirectory);
+    }
+    if (sessionId) {
+      titleParts.push(`[${sessionId.substring(0, 8)}]`);
+    }
+    document.title =
+      titleParts.length > 0 ? titleParts.join(" - ") : "Claude Code Web UI";
+  }, [workingDirectory, sessionId]);
+
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
       <div className="max-w-6xl mx-auto p-3 sm:p-6 h-screen flex flex-col">
