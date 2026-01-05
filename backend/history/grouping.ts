@@ -6,6 +6,7 @@
 import type { ConversationSummary } from "../../shared/types.ts";
 import type { ConversationFile } from "./parser.ts";
 import { isSubset } from "./parser.ts";
+import { logger } from "../utils/logger.ts";
 
 /**
  * Group conversations and remove duplicates from continued sessions
@@ -18,9 +19,18 @@ export function groupConversations(
     return [];
   }
 
+  // Filter out agent sessions (session IDs starting with "agent")
+  const filteredFiles = conversationFiles.filter(
+    (conv) => !conv.sessionId.toLowerCase().startsWith("agent"),
+  );
+
+  logger.history.debug(
+    `Filtered ${conversationFiles.length - filteredFiles.length} agent sessions, remaining: ${filteredFiles.length}`,
+  );
+
   // Sort conversations by message ID set size (ascending)
   // This ensures we process smaller conversations first
-  const sortedConversations = [...conversationFiles].sort((a, b) => {
+  const sortedConversations = [...filteredFiles].sort((a, b) => {
     return a.messageIds.size - b.messageIds.size;
   });
 
