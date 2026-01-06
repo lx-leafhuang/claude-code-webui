@@ -17,6 +17,15 @@ import { handleHistoriesRequest } from "./handlers/histories.ts";
 import { handleConversationRequest } from "./handlers/conversations.ts";
 import { handleChatRequest } from "./handlers/chat.ts";
 import { handleAbortRequest } from "./handlers/abort.ts";
+import {
+  handleCreateTask,
+  handleListTasks,
+  handleGetTask,
+  handleStreamTask,
+  handleDeleteTask,
+  handleAbortTask,
+} from "./handlers/tasks.ts";
+import { handleWebSocketConnection } from "./handlers/websocket.ts";
 import { logger } from "./utils/logger.ts";
 import { readBinaryFile } from "./utils/fs.ts";
 
@@ -71,6 +80,21 @@ export function createApp(
   );
 
   app.post("/api/chat", (c) => handleChatRequest(c, requestAbortControllers));
+
+  // Background Task API routes
+  app.post("/api/tasks", (c) => handleCreateTask(c));
+  app.get("/api/tasks", (c) => handleListTasks(c));
+  app.get("/api/tasks/:taskId", (c) => handleGetTask(c));
+  app.get("/api/tasks/:taskId/stream", (c) => handleStreamTask(c));
+  app.delete("/api/tasks/:taskId", (c) => handleDeleteTask(c));
+  app.post("/api/tasks/:taskId/abort", (c) => handleAbortTask(c));
+
+  // WebSocket connection for real-time task updates
+  // Note: WebSocket handlers have a special return type in Hono v4
+  // Persistent WebSocket connection at /api/ws for session-based subscriptions
+  app.get("/api/ws", handleWebSocketConnection() as any);
+  // Task-specific WebSocket connection (for backward compatibility)
+  app.get("/api/ws/tasks/:taskId", handleWebSocketConnection() as any);
 
   // Static file serving with SPA fallback
   // Serve static assets (CSS, JS, images, etc.)

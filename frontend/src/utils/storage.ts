@@ -75,7 +75,7 @@ function migrateLegacySettings(): AppSettings {
   const migratedSettings: AppSettings = {
     theme: legacyTheme,
     enterBehavior: legacyEnterBehavior,
-    autoApprovePermissions: false,
+    autoApprovePermissions: true,
     version: CURRENT_SETTINGS_VERSION,
   };
 

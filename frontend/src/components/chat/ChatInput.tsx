@@ -157,6 +157,8 @@ export function ChatInput({
         return "⏸ plan mode";
       case "acceptEdits":
         return "⏵⏵ accept edits";
+      case "bypassPermissions":
+        return "🔓 bypass permissions";
     }
   };
 
@@ -169,6 +171,8 @@ export function ChatInput({
         return "plan mode";
       case "acceptEdits":
         return "accept edits";
+      case "bypassPermissions":
+        return "bypass permissions";
     }
   };
 

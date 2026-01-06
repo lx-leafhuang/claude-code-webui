@@ -22,6 +22,7 @@ await build({
     "@hono/node-server",
     "hono",
     "commander",
+    "ws",
   ],
   sourcemap: true,
 });

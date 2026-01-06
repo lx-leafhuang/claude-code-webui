@@ -1,13 +1,50 @@
 import { Context } from "hono";
 import type { ProjectInfo, ProjectsResponse } from "../../shared/types.ts";
 import { getEncodedProjectName } from "../history/pathUtils.ts";
+import { parseAllHistoryFiles } from "../history/parser.ts";
 import { logger } from "../utils/logger.ts";
 import { readTextFile } from "../utils/fs.ts";
 import { getHomeDir } from "../utils/os.ts";
 
 /**
+ * Get the most recent lastActiveTime for a project from its history files
+ * This function silently handles corrupted history files to avoid logging errors
+ */
+async function getProjectLastActiveTime(
+  encodedName: string,
+): Promise<string | undefined> {
+  const homeDir = getHomeDir();
+  if (!homeDir) return undefined;
+
+  const historyDir = `${homeDir}/.claude/projects/${encodedName}`;
+
+  try {
+    // Use silent mode to avoid logging errors for corrupted history files
+    // when only getting the last active time for project sorting
+    const conversationFiles = await parseAllHistoryFiles(historyDir, true);
+
+    // Find the maximum lastTime across all conversation files
+    let maxLastTime: string | undefined;
+
+    for (const conv of conversationFiles) {
+      if (conv.lastTime && conv.messageCount > 0) {
+        if (!maxLastTime || conv.lastTime > maxLastTime) {
+          maxLastTime = conv.lastTime;
+        }
+      }
+    }
+
+    return maxLastTime;
+  } catch {
+    // Silently return undefined for any errors (e.g., corrupted history files)
+    return undefined;
+  }
+}
+
+/**
  * Handles GET /api/projects requests
  * Retrieves list of available project directories from Claude configuration
+ * Sorted by last active time (most recent first)
  * @param c - Hono context object
  * @returns JSON response with projects array
  */
@@ -27,20 +64,34 @@ export async function handleProjectsRequest(c: Context) {
       if (config.projects && typeof config.projects === "object") {
         const projectPaths = Object.keys(config.projects);
 
-        // Get encoded names for each project, only include projects with history
-        const projects: ProjectInfo[] = [];
+        // Get encoded names for each project with last active time
+        const projectsWithTime: ProjectInfo[] = [];
         for (const path of projectPaths) {
           const encodedName = await getEncodedProjectName(path);
           // Only include projects that have history directories
           if (encodedName) {
-            projects.push({
+            const lastActiveTime = await getProjectLastActiveTime(encodedName);
+            projectsWithTime.push({
               path,
               encodedName,
+              lastActiveTime,
             });
           }
         }
 
-        const response: ProjectsResponse = { projects };
+        // Sort by lastActiveTime descending (most recent first)
+        // Projects without activity time go to the end
+        projectsWithTime.sort((a, b) => {
+          const timeA = a.lastActiveTime
+            ? new Date(a.lastActiveTime).getTime()
+            : 0;
+          const timeB = b.lastActiveTime
+            ? new Date(b.lastActiveTime).getTime()
+            : 0;
+          return timeB - timeA;
+        });
+
+        const response: ProjectsResponse = { projects: projectsWithTime };
         return c.json(response);
       } else {
         const response: ProjectsResponse = { projects: [] };

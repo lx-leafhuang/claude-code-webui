@@ -170,7 +170,11 @@ export function isTodoMessage(message: AllMessage): message is TodoMessage {
 }
 
 // Permission mode types (UI-focused subset of SDK PermissionMode)
-export type PermissionMode = "default" | "plan" | "acceptEdits";
+export type PermissionMode =
+  | "default"
+  | "plan"
+  | "acceptEdits"
+  | "bypassPermissions";
 
 // SDK type integration utilities
 export function toSDKPermissionMode(uiMode: PermissionMode): SDKPermissionMode {
@@ -218,6 +222,9 @@ export type {
   ChatRequest,
   ProjectsResponse,
   ProjectInfo,
+  ConversationSummary,
+  HistoryListResponse,
+  ConversationHistory,
 } from "../../shared/types";
 
 // Re-export SDK types

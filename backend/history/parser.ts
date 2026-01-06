@@ -41,9 +41,11 @@ export interface ConversationFile {
 /**
  * Parse a single JSONL file and extract conversation data
  * @private - Internal function used by parseAllHistoryFiles
+ * @param silent - If true, silently skip corrupted lines without logging errors
  */
 async function parseHistoryFile(
   filePath: string,
+  silent: boolean = false,
 ): Promise<ConversationFile | null> {
   try {
     const content = await readTextFile(filePath);
@@ -96,9 +98,11 @@ async function parseHistoryFile(
           }
         }
       } catch (parseError) {
-        logger.history.error(`Failed to parse line in ${filePath}: {error}`, {
-          error: parseError,
-        });
+        if (!silent) {
+          logger.history.error(`Failed to parse line in ${filePath}: {error}`, {
+            error: parseError,
+          });
+        }
         // Continue processing other lines
       }
     }
@@ -149,15 +153,17 @@ async function getHistoryFiles(historyDir: string): Promise<string[]> {
 /**
  * Parse all conversation files in a history directory
  * Used by the histories endpoint to get conversation summaries
+ * @param silent - If true, silently skip corrupted lines without logging errors
  */
 export async function parseAllHistoryFiles(
   historyDir: string,
+  silent: boolean = false,
 ): Promise<ConversationFile[]> {
   const filePaths = await getHistoryFiles(historyDir);
   const results: ConversationFile[] = [];
 
   for (const filePath of filePaths) {
-    const parsed = await parseHistoryFile(filePath);
+    const parsed = await parseHistoryFile(filePath, silent);
     if (parsed) {
       results.push(parsed);
     }

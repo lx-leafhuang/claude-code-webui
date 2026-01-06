@@ -42,3 +42,24 @@ export const getConversationUrl = (
 ) => {
   return `${API_CONFIG.ENDPOINTS.CONVERSATIONS}/${encodedProjectName}/histories/${sessionId}`;
 };
+
+// Task API helpers
+export const getTasksUrl = () => {
+  return "/api/tasks";
+};
+
+export const getTaskUrl = (taskId: string) => {
+  return `/api/tasks/${taskId}`;
+};
+
+export const getTaskStreamUrl = (taskId: string) => {
+  return `/api/tasks/${taskId}/stream`;
+};
+
+export const createTaskUrl = () => {
+  return "/api/tasks";
+};
+
+export const abortTaskUrl = (taskId: string) => {
+  return `/api/tasks/${taskId}/abort`;
+};

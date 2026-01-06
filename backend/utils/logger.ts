@@ -16,6 +16,20 @@ import { getPrettyFormatter } from "@logtape/pretty";
 let isConfigured = false;
 
 /**
+ * Get custom timestamp formatter (YYYY-MM-DD HH:mm:ss without timezone)
+ */
+function getCustomTimestamp(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hour = String(now.getHours()).padStart(2, "0");
+  const minute = String(now.getMinutes()).padStart(2, "0");
+  const second = String(now.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+/**
  * Initialize the logging system
  * @param debugMode - Whether to enable debug level logging
  */
@@ -32,6 +46,7 @@ export async function setupLogger(debugMode: boolean): Promise<void> {
         formatter: getPrettyFormatter({
           icons: false, // Remove emoji icons
           align: false, // Disable column alignment for cleaner output
+          timestamp: getCustomTimestamp, // Use custom timestamp format
           inspectOptions: {
             depth: Infinity, // Unlimited depth for complex objects
             colors: true, // Keep syntax highlighting
@@ -73,6 +88,12 @@ export const logger = {
 
   // API handlers
   api: getLogger(["api"]),
+
+  // Background task management
+  task: getLogger(["task"]),
+
+  // WebSocket connections
+  ws: getLogger(["ws"]),
 
   // General application logging
   app: getLogger(["app"]),

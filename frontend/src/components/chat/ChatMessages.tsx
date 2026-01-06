@@ -24,9 +24,20 @@ import {
 interface ChatMessagesProps {
   messages: AllMessage[];
   isLoading: boolean;
+  taskMessages?: Array<{ type: string; data: unknown; timestamp: number }>;
+  processedMessages?: Set<number>;
 }
 
-export function ChatMessages({ messages, isLoading }: ChatMessagesProps) {
+export function ChatMessages({
+  messages,
+  isLoading,
+  taskMessages = [],
+  processedMessages = new Set(),
+}: ChatMessagesProps) {
+  // Silence unused variable warnings - these are for future WebSocket task message handling
+  void taskMessages;
+  void processedMessages;
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
 

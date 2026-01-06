@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { AllMessage, TimestampedSDKMessage } from "../types";
 import type { ConversationHistory } from "../../../shared/types";
-import { getConversationUrl } from "../config/api";
+import { API_CONFIG, getConversationUrl } from "../config/api";
 import { useMessageConverter } from "./useMessageConverter";
 
 interface HistoryLoaderState {
@@ -133,19 +133,93 @@ export function useHistoryLoader(): HistoryLoaderResult {
 
 /**
  * Hook for loading conversation history on mount when sessionId is provided
+ * If no sessionId is provided, automatically loads the most recent conversation
  */
 export function useAutoHistoryLoader(
-  encodedProjectName?: string,
-  sessionId?: string,
+  encodedProjectName?: string | null,
+  sessionId?: string | null,
 ): HistoryLoaderResult {
   const historyLoader = useHistoryLoader();
 
+  // Convert URL-encoded project name to Claude's internal encoding format
+  // Claude uses '-' instead of '/' and other special chars in directory names
+  const convertToClaudeFormat = (urlEncoded: string): string => {
+    // First decode URL encoding
+    const decoded = decodeURIComponent(urlEncoded);
+    // Then replace leading / and other special chars with -
+    return decoded.replace(/^\//, "-").replace(/[/\\:._]/g, "-");
+  };
+
+  // Auto-load most recent conversation when no sessionId is provided
   useEffect(() => {
-    if (encodedProjectName && sessionId) {
-      historyLoader.loadHistory(encodedProjectName, sessionId);
-    } else if (!sessionId) {
-      // Only clear if there's no sessionId - don't clear while waiting for encodedProjectName
+    if (!encodedProjectName) {
+      // If no encodedProjectName yet, clear history and wait
       historyLoader.clearHistory();
+      return;
+    }
+
+    // Convert to Claude's internal format for API call
+    const claudeFormatName = convertToClaudeFormat(encodedProjectName);
+
+    if (sessionId) {
+      // If sessionId is provided, load that specific conversation
+      historyLoader.loadHistory(claudeFormatName, sessionId);
+    } else {
+      // Fetch latest conversation
+      // If no sessionId, fetch the conversation list and load the most recent one
+      const fetchLatestConversation = async () => {
+        try {
+          // Use the Claude format name for the API
+          const response = await fetch(
+            `${API_CONFIG.ENDPOINTS.HISTORIES}/${claudeFormatName}/histories`,
+          );
+          if (response.ok) {
+            const data = await response.json();
+            if (data.conversations && data.conversations.length > 0) {
+              // Sort by lastTime descending (most recently active first)
+              // Note: lastTime can be ISO string or timestamp
+              // Put conversations without lastTime at the end
+              const sortedConversations = [...data.conversations].sort(
+                (a, b) => {
+                  const timeA =
+                    typeof a.lastTime === "number"
+                      ? a.lastTime
+                      : a.lastTime
+                        ? new Date(a.lastTime).getTime()
+                        : 0;
+                  const timeB =
+                    typeof b.lastTime === "number"
+                      ? b.lastTime
+                      : b.lastTime
+                        ? new Date(b.lastTime).getTime()
+                        : 0;
+                  return timeB - timeA;
+                },
+              );
+              // Find first conversation with actual messages (has lastTime and messageCount > 0)
+              const latestConversation =
+                sortedConversations.find(
+                  (c) => c.lastTime && c.messageCount > 0,
+                ) || sortedConversations[0];
+              await historyLoader.loadHistory(
+                claudeFormatName,
+                latestConversation.sessionId,
+              );
+            } else {
+              historyLoader.clearHistory();
+            }
+          } else {
+            historyLoader.clearHistory();
+          }
+        } catch (error) {
+          console.error("Error fetching latest conversation:", error);
+          historyLoader.clearHistory();
+        }
+      };
+
+      // Small delay to ensure projects are loaded
+      const timer = setTimeout(fetchLatestConversation, 500);
+      return () => clearTimeout(timer);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encodedProjectName, sessionId]);

@@ -20,6 +20,7 @@ export interface AbortRequest {
 export interface ProjectInfo {
   path: string;
   encodedName: string;
+  lastActiveTime?: string;
 }
 
 export interface ProjectsResponse {

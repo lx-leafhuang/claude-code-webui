@@ -7,23 +7,22 @@ import type {
   ProjectInfo,
   PermissionMode,
 } from "../types";
-import { useClaudeStreaming } from "../hooks/useClaudeStreaming";
 import { useChatState } from "../hooks/chat/useChatState";
 import { usePermissions } from "../hooks/chat/usePermissions";
 import { usePermissionMode } from "../hooks/chat/usePermissionMode";
 import { useAbortController } from "../hooks/chat/useAbortController";
 import { useAutoHistoryLoader } from "../hooks/useHistoryLoader";
 import { useAutoApprovePermissions } from "../hooks/useSettings";
+import { useWebSocketContext } from "../context/WebSocketContext";
 import { SettingsButton } from "./SettingsButton";
 import { SettingsModal } from "./SettingsModal";
 import { HistoryButton } from "./chat/HistoryButton";
 import { ChatInput } from "./chat/ChatInput";
 import { ChatMessages } from "./chat/ChatMessages";
 import { HistoryView } from "./HistoryView";
-import { getChatUrl, getProjectsUrl } from "../config/api";
+import { getProjectsUrl, createTaskUrl } from "../config/api";
 import { KEYBOARD_SHORTCUTS } from "../utils/constants";
 import { normalizeWindowsPath } from "../utils/pathUtils";
-import type { StreamingContext } from "../hooks/streaming/useMessageProcessor";
 
 export function ChatPage() {
   const location = useLocation();
@@ -31,6 +30,8 @@ export function ChatPage() {
   const [searchParams] = useSearchParams();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string | null>(null);
 
   // Auto approve permissions setting
   const { autoApprovePermissions, toggleAutoApprovePermissions } =
@@ -38,6 +39,13 @@ export function ChatPage() {
   // Use ref to avoid stale closure in streaming context
   const autoApprovePermissionsRef = useRef(autoApprovePermissions);
   autoApprovePermissionsRef.current = autoApprovePermissions;
+
+  // Task messages ref for WebSocket updates
+  const taskMessagesRef = useRef<
+    Array<{ type: string; data: unknown; timestamp: number }>
+  >([]);
+  // Track processed message timestamps to prevent duplicates
+  const processedMessagesRef = useRef<Set<number>>(new Set());
 
   // Extract and normalize working directory from URL
   const workingDirectory = (() => {
@@ -57,31 +65,64 @@ export function ChatPage() {
   const isHistoryView = currentView === "history";
   const isLoadedConversation = !!sessionId && !isHistoryView;
 
-  const { processStreamLine } = useClaudeStreaming();
-  const { abortRequest, createAbortHandler } = useAbortController();
+  const { abortRequest } = useAbortController();
 
   // Permission mode state management
   const { permissionMode, setPermissionMode } = usePermissionMode();
 
+  // Convert working directory to Claude's internal encoding format
+  // Claude uses '-' instead of '/' and other special chars in directory names
+  const convertToClaudeFormat = useCallback((path: string): string => {
+    return path.replace(/[/\\:._]/g, "-");
+  }, []);
+
   // Get encoded name for current working directory
   const getEncodedName = useCallback(() => {
-    if (!workingDirectory || !projects.length) {
+    if (!workingDirectory) {
       return null;
     }
 
-    const project = projects.find((p) => p.path === workingDirectory);
+    // First try to find in projects list
+    if (projects.length > 0) {
+      const project = projects.find((p) => p.path === workingDirectory);
 
-    // Normalize paths for comparison (handle Windows path issues)
-    const normalizedWorking = normalizeWindowsPath(workingDirectory);
-    const normalizedProject = projects.find(
-      (p) => normalizeWindowsPath(p.path) === normalizedWorking,
-    );
+      // Normalize paths for comparison (handle Windows path issues)
+      const normalizedWorking = normalizeWindowsPath(workingDirectory);
+      const normalizedProject = projects.find(
+        (p) => normalizeWindowsPath(p.path) === normalizedWorking,
+      );
 
-    // Use normalized result if exact match fails
-    const finalProject = project || normalizedProject;
+      // Use normalized result if exact match fails
+      const finalProject = project || normalizedProject;
 
-    return finalProject?.encodedName || null;
-  }, [workingDirectory, projects]);
+      if (finalProject?.encodedName) {
+        return finalProject.encodedName;
+      }
+    }
+
+    // If not found in projects list, compute from working directory directly
+    return convertToClaudeFormat(workingDirectory);
+  }, [workingDirectory, projects, convertToClaudeFormat]);
+
+  // Load projects for additional metadata (encodedName fallback still works without this)
+  useEffect(() => {
+    const loadProjects = async () => {
+      try {
+        const response = await fetch(getProjectsUrl());
+        if (response.ok) {
+          const data = await response.json();
+          setProjects(data.projects || []);
+        }
+      } catch (error) {
+        console.error("Failed to load projects:", error);
+      }
+    };
+    loadProjects();
+  }, []);
+
+  // Derived state for encoded name - can compute immediately since getEncodedName
+  // now handles both cases (projects list and direct computation)
+  const encodedProjectName = getEncodedName();
 
   // Load conversation history if sessionId is provided
   const {
@@ -89,48 +130,38 @@ export function ChatPage() {
     loading: historyLoading,
     error: historyError,
     sessionId: loadedSessionId,
-  } = useAutoHistoryLoader(
-    getEncodedName() || undefined,
-    sessionId || undefined,
-  );
+  } = useAutoHistoryLoader(encodedProjectName, sessionId);
 
   // Initialize chat state with loaded history
+  // Use sessionId from URL when available, fall back to loadedSessionId after history loads
+  // This ensures we preserve the sessionId from URL even before history is loaded
   const {
     messages,
     input,
     isLoading,
     currentSessionId,
     currentRequestId,
-    hasShownInitMessage,
-    currentAssistantMessage,
     setInput,
-    setCurrentSessionId,
-    setHasShownInitMessage,
-    setHasReceivedInit,
-    setCurrentAssistantMessage,
     addMessage,
-    updateLastMessage,
     clearInput,
     generateRequestId,
     resetRequestState,
     startRequest,
   } = useChatState({
     initialMessages: historyMessages,
-    initialSessionId: loadedSessionId || undefined,
+    // Use URL sessionId if available, otherwise use loadedSessionId after history loads
+    // This prevents creating a new random sessionId during initial render
+    initialSessionId: sessionId || loadedSessionId || undefined,
   });
 
   const {
     allowedTools,
     permissionRequest,
-    showPermissionRequest,
     closePermissionRequest,
-    allowToolTemporary,
-    allowToolPermanent,
     isPermissionMode,
-    planModeRequest,
-    showPlanModeRequest,
     closePlanModeRequest,
     updatePermissionMode,
+    planModeRequest,
   } = usePermissions({
     onPermissionModeChange: setPermissionMode,
   });
@@ -161,13 +192,13 @@ export function ChatPage() {
       if (!messageContent) clearInput();
       startRequest();
 
+      // Always use background task mode with WebSocket for real-time updates
       try {
-        // Determine effective permission mode: use bypassPermissions if auto-approve is enabled
         const effectivePermissionMode = autoApprovePermissionsRef.current
           ? "bypassPermissions"
           : overridePermissionMode || permissionMode;
 
-        const response = await fetch(getChatUrl(), {
+        const response = await fetch(createTaskUrl(), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -180,76 +211,33 @@ export function ChatPage() {
           } as ChatRequest),
         });
 
-        if (!response.body) throw new Error("No response body");
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        // Local state for this streaming session
-        let localHasReceivedInit = false;
-        let shouldAbort = false;
-
-        const streamingContext: StreamingContext = {
-          currentAssistantMessage,
-          setCurrentAssistantMessage,
-          addMessage,
-          updateLastMessage,
-          onSessionId: setCurrentSessionId,
-          shouldShowInitMessage: () => !hasShownInitMessage,
-          onInitMessageShown: () => setHasShownInitMessage(true),
-          get hasReceivedInit() {
-            return localHasReceivedInit;
-          },
-          setHasReceivedInit: (received: boolean) => {
-            localHasReceivedInit = received;
-            setHasReceivedInit(received);
-          },
-          // Use ref to avoid stale closure - bypass dialog if auto-approve is enabled
-          onPermissionError: (
-            toolName: string,
-            patterns: string[],
-            toolUseId: string,
-          ) => {
-            if (autoApprovePermissionsRef.current) {
-              // Auto-approve is enabled, silently ignore the permission request
-              return;
-            }
-            // Check if this is an ExitPlanMode permission error
-            if (patterns.includes("ExitPlanMode")) {
-              showPlanModeRequest("");
-            } else {
-              showPermissionRequest(toolName, patterns, toolUseId);
-            }
-          },
-          onAbortRequest: async () => {
-            shouldAbort = true;
-            await createAbortHandler(requestId)();
-          },
-        };
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done || shouldAbort) break;
-
-          const chunk = decoder.decode(value);
-          const lines = chunk.split("\n").filter((line) => line.trim());
-
-          for (const line of lines) {
-            if (shouldAbort) break;
-            processStreamLine(line, streamingContext);
-          }
-
-          if (shouldAbort) break;
+        if (!response.ok) {
+          throw new Error("Failed to create task");
         }
-      } catch (error) {
-        console.error("Failed to send message:", error);
+
+        const task = await response.json();
+
+        // Set up task with WebSocket
+        setCurrentTaskId(task.taskId);
+        setTaskStatus("running");
+        taskMessagesRef.current = [];
+        processedMessagesRef.current.clear();
+
+        // Add initial task creation message
         addMessage({
           type: "chat",
           role: "assistant",
-          content: "Error: Failed to get response",
+          content: `Running task... (ID: ${task.taskId.substring(0, 8)})`,
           timestamp: Date.now(),
         });
-      } finally {
+      } catch (error) {
+        console.error("Failed to start task:", error);
+        addMessage({
+          type: "chat",
+          role: "assistant",
+          content: "Error: Failed to start task",
+          timestamp: Date.now(),
+        });
         resetRequestState();
       }
     },
@@ -258,30 +246,39 @@ export function ChatPage() {
       isLoading,
       currentSessionId,
       allowedTools,
-      hasShownInitMessage,
-      currentAssistantMessage,
       workingDirectory,
       permissionMode,
       generateRequestId,
       clearInput,
       startRequest,
       addMessage,
-      updateLastMessage,
-      setCurrentSessionId,
-      setHasShownInitMessage,
-      setHasReceivedInit,
-      setCurrentAssistantMessage,
       resetRequestState,
-      processStreamLine,
-      createAbortHandler,
-      showPermissionRequest,
-      showPlanModeRequest,
     ],
   );
 
-  const handleAbort = useCallback(() => {
-    abortRequest(currentRequestId, isLoading, resetRequestState);
-  }, [abortRequest, currentRequestId, isLoading, resetRequestState]);
+  const handleAbort = useCallback(async () => {
+    if (currentTaskId) {
+      // Abort background task
+      try {
+        await fetch(`/api/tasks/${currentTaskId}/abort`, {
+          method: "POST",
+        });
+        setTaskStatus("aborted");
+        setCurrentTaskId(null);
+        resetRequestState();
+      } catch (error) {
+        console.error("Failed to abort task:", error);
+      }
+    } else {
+      abortRequest(currentRequestId, isLoading, resetRequestState);
+    }
+  }, [
+    abortRequest,
+    currentRequestId,
+    isLoading,
+    resetRequestState,
+    currentTaskId,
+  ]);
 
   // Permission request handlers
   const handlePermissionAllow = useCallback(() => {
@@ -389,22 +386,6 @@ export function ChatPage() {
     setIsSettingsOpen(false);
   }, []);
 
-  // Load projects to get encodedName mapping
-  useEffect(() => {
-    const loadProjects = async () => {
-      try {
-        const response = await fetch(getProjectsUrl());
-        if (response.ok) {
-          const data = await response.json();
-          setProjects(data.projects || []);
-        }
-      } catch (error) {
-        console.error("Failed to load projects:", error);
-      }
-    };
-    loadProjects();
-  }, []);
-
   const handleBackToChat = useCallback(() => {
     navigate({ search: "" });
   }, [navigate]);
@@ -418,12 +399,6 @@ export function ChatPage() {
   const handleBackToProjects = useCallback(() => {
     navigate("/");
   }, [navigate]);
-
-  const handleBackToProjectChat = useCallback(() => {
-    if (workingDirectory) {
-      navigate(`/projects${workingDirectory}`);
-    }
-  }, [navigate, workingDirectory]);
 
   // Handle global keyboard shortcuts
   useEffect(() => {
@@ -445,11 +420,129 @@ export function ChatPage() {
       titleParts.push(workingDirectory);
     }
     if (sessionId) {
-      titleParts.push(`[${sessionId.substring(0, 8)}]`);
+      titleParts.push(`[${sessionId}]`);
     }
     document.title =
       titleParts.length > 0 ? titleParts.join(" - ") : "Claude Code Web UI";
   }, [workingDirectory, sessionId]);
+
+  // Helper to extract text content from Claude SDK message
+  const extractMessageContent = useCallback((data: unknown): string => {
+    if (typeof data !== "object" || data === null) {
+      return String(data);
+    }
+
+    const sdkData = data as Record<string, unknown>;
+
+    // Check if this is a result message (has "result" field)
+    if ("result" in sdkData) {
+      const result = sdkData.result;
+      if (typeof result === "string") {
+        return result;
+      }
+      if (typeof result === "object" && result !== null) {
+        return JSON.stringify(result, null, 2);
+      }
+      return String(result);
+    }
+
+    // For assistant type messages, look for message.content
+    if ("message" in sdkData && sdkData.message) {
+      const messageObj = sdkData.message;
+      if (typeof messageObj === "object") {
+        const message = messageObj as Record<string, unknown>;
+        if ("content" in message && Array.isArray(message.content)) {
+          const content = message.content as Array<{
+            type: string;
+            text?: string;
+            thinking?: string;
+          }>;
+          const textParts: string[] = [];
+          for (const block of content) {
+            if (block.type === "text" && block.text) {
+              textParts.push(block.text);
+            } else if (block.type === "thinking" && block.thinking) {
+              textParts.push(`[Thinking] ${block.thinking}`);
+            }
+          }
+          if (textParts.length > 0) {
+            return textParts.join("\n");
+          }
+        }
+      }
+    }
+
+    return JSON.stringify(data, null, 2);
+  }, []);
+
+  // WebSocket callback handlers - wrapped in useCallback to prevent re-connections
+  const handleWebSocketMessage = useCallback(
+    (message: {
+      type: string;
+      taskId: string;
+      data: unknown;
+      timestamp: number;
+    }) => {
+      // Only handle task messages for the current task
+      if (message.type === "task_message" && message.taskId === currentTaskId) {
+        // Skip duplicate messages
+        if (processedMessagesRef.current.has(message.timestamp)) {
+          console.log(
+            `[WebSocket] Skipping duplicate message with timestamp: ${message.timestamp}`,
+          );
+          return;
+        }
+        processedMessagesRef.current.add(message.timestamp);
+
+        taskMessagesRef.current.push({
+          type: message.type,
+          data: message.data,
+          timestamp: message.timestamp,
+        });
+
+        // Only add to chat if it's a result or assistant message
+        const content = extractMessageContent(message.data);
+        if (content && content.trim()) {
+          addMessage({
+            type: "chat",
+            role: "assistant",
+            content: content.trim(),
+            timestamp: message.timestamp,
+          });
+        }
+      }
+    },
+    [addMessage, extractMessageContent, currentTaskId],
+  );
+
+  // Use global WebSocket connection from context
+  const {
+    isConnected: wsConnected,
+    subscribeToSession,
+    subscribeToTask,
+    onTaskMessage,
+  } = useWebSocketContext();
+
+  // Set up task message handler when session changes
+  useEffect(() => {
+    if (currentSessionId) {
+      subscribeToSession(currentSessionId);
+    }
+  }, [currentSessionId, subscribeToSession]);
+
+  // Register task message callback
+  useEffect(() => {
+    if (currentSessionId) {
+      onTaskMessage(handleWebSocketMessage);
+    }
+  }, [currentSessionId, handleWebSocketMessage, onTaskMessage]);
+
+  // Subscribe to new task when currentTaskId changes
+  useEffect(() => {
+    if (currentTaskId && wsConnected) {
+      subscribeToTask(currentTaskId);
+    }
+  }, [currentTaskId, wsConnected, subscribeToTask]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 transition-colors duration-300">
@@ -491,32 +584,33 @@ export function ChatPage() {
                       "Claude Code Web UI"
                     )}
                   </button>
-                  {(isHistoryView || sessionId) && (
-                    <>
-                      <span
-                        className="text-slate-800 dark:text-slate-100 text-lg sm:text-3xl font-bold tracking-tight mx-3 select-none"
-                        aria-hidden="true"
-                      >
-                        {" "}
-                        ›{" "}
-                      </span>
-                      <h1
-                        className="text-slate-800 dark:text-slate-100 text-lg sm:text-3xl font-bold tracking-tight"
-                        aria-current="page"
-                      >
-                        {isHistoryView
-                          ? "Conversation History"
-                          : "Conversation"}
-                      </h1>
-                    </>
-                  )}
                 </div>
               </nav>
               {sessionId && (
                 <div className="flex items-center text-sm font-mono mt-1">
                   <span className="text-xs text-slate-600 dark:text-slate-400">
-                    Session: {sessionId.substring(0, 8)}...
+                    Session: {sessionId}
                   </span>
+                  {currentTaskId && taskStatus && (
+                    <span className="ml-3 flex items-center">
+                      <span
+                        className={`w-2 h-2 rounded-full mr-1.5 ${
+                          taskStatus === "running"
+                            ? "bg-green-500 animate-pulse"
+                            : taskStatus === "pending"
+                              ? "bg-yellow-500"
+                              : taskStatus === "completed"
+                                ? "bg-blue-500"
+                                : taskStatus === "failed"
+                                  ? "bg-red-500"
+                                  : "bg-gray-500"
+                        }`}
+                      ></span>
+                      <span className="text-xs text-slate-600 dark:text-slate-400">
+                        Task: {taskStatus}
+                      </span>
+                    </span>
+                  )}
                 </div>
               )}
             </div>
@@ -556,7 +650,7 @@ export function ChatPage() {
         {isHistoryView ? (
           <HistoryView
             workingDirectory={workingDirectory || ""}
-            encodedName={getEncodedName()}
+            encodedName={encodedProjectName || getEncodedName()}
             onBack={handleBackToChat}
           />
         ) : historyLoading ? (
@@ -606,6 +700,22 @@ export function ChatPage() {
           <>
             {/* Chat Messages */}
             <ChatMessages messages={messages} isLoading={isLoading} />
+
+            {/* Session Selection Prompt - Show when messages exist but no session selected */}
+            {!sessionId && messages.length > 0 && (
+              <div className="mb-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl">
+                <p className="text-sm text-blue-700 dark:text-blue-300 text-center">
+                  💡 对话已保存。点击右上角
+                  <button
+                    onClick={handleHistoryClick}
+                    className="mx-1 font-medium hover:underline text-blue-600 dark:text-blue-400"
+                  >
+                    "历史记录"
+                  </button>
+                  选择会话继续对话
+                </p>
+              </div>
+            )}
 
             {/* Input */}
             <ChatInput

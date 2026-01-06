@@ -32,7 +32,24 @@ export function HistoryView({ encodedName }: HistoryViewProps) {
           );
         }
         const data = await response.json();
-        setConversations(data.conversations || []);
+        const conversations = data.conversations || [];
+
+        // Sort by lastTime descending (most recent first)
+        const sortedConversations = [...conversations].sort((a, b) => {
+          const timeA = a.lastTime
+            ? typeof a.lastTime === "number"
+              ? a.lastTime
+              : new Date(a.lastTime).getTime()
+            : 0;
+          const timeB = b.lastTime
+            ? typeof b.lastTime === "number"
+              ? b.lastTime
+              : new Date(b.lastTime).getTime()
+            : 0;
+          return timeB - timeA;
+        });
+
+        setConversations(sortedConversations);
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load conversations",
@@ -137,11 +154,15 @@ export function HistoryView({ encodedName }: HistoryViewProps) {
               <div className="flex items-start justify-between">
                 <div className="flex-1 min-w-0">
                   <h3 className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
-                    Session: {conversation.sessionId.substring(0, 8)}...
+                    Session: {conversation.sessionId}
                   </h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                    {new Date(conversation.startTime).toLocaleString()} •{" "}
-                    {conversation.messageCount} messages
+                    {conversation.lastTime
+                      ? new Date(conversation.lastTime).toLocaleString()
+                      : conversation.startTime
+                        ? new Date(conversation.startTime).toLocaleString()
+                        : "Unknown date"}{" "}
+                    • {conversation.messageCount} messages
                   </p>
                   <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">
                     {conversation.lastMessagePreview}
